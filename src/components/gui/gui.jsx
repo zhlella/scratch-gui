@@ -82,7 +82,7 @@ const GUIComponent = props => {
         <Box
             className={styles.pageWrapper}
             {...componentProps}
-        >
+        >123456
             {previewInfoVisible ? (
                 <PreviewModal />
             ) : null}
