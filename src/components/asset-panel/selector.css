@@ -20,7 +20,7 @@
     align-items: center;
     justify-content: space-around;
     padding: 0.75rem 0;
-    color: $motion-primary;
+    color: $looks-secondary;
     text-align: center;
     background: none;
 }
@@ -32,6 +32,7 @@ $fade-out-distance: 100px;
     position: absolute;
     bottom: 0;
     left: 0;
+    right:0;
     background: linear-gradient(rgba(232,237,241, 0),rgba(232,237,241, 1));
     height: $fade-out-distance;
     width: 100%;
@@ -47,12 +48,24 @@ $fade-out-distance: 100px;
     height: 0;
     flex-grow: 1;
     overflow-y: scroll;
+    display: flex;
+    flex-direction: column;
+}
+
+.list-area:after {
+    /* Make sure there is room to scroll beyond the last tile */
+    content: '';
+    display: block;
+    height: 70px;
+    width: 100%;
+    flex-shrink: 0;
+    order: 99999999;
 }
 
 .list-item {
     width: 5rem;
-    min-height: 5rem;
-    margin: 1rem auto;
+    height: 5rem;
+    margin: 0.5rem auto;
 }
 
 @media only screen and (max-width: $full-size-paint) {
@@ -63,4 +76,10 @@ $fade-out-distance: 100px;
     .list-item {
         width: 4rem;
     }
+}
+
+
+.list-item.placeholder {
+    background: white;
+    filter: opacity(15%) brightness(0%);
 }

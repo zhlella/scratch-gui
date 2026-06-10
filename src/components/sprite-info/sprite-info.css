@@ -2,7 +2,6 @@
 @import "../../css/colors.css";
 
 .sprite-info {
-    height: $sprite-info-height;
     padding: 0.75rem;
     font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
     background-color: white;
@@ -29,56 +28,23 @@
     align-items: center;
 }
 
+.column {
+    display: inline-flex;
+    flex-direction: column; /* put label above input */
+    align-items: flex-start;
+}
+
+.column span {
+    margin-bottom: .25rem;
+}
+
 .icon-wrapper {
     display: inline-block;
-    box-sizing: content-box;
-    width: 1rem;
-    height: 1rem;
+    width: calc(2rem + 2px);
+    height: calc(2rem + 2px);
     padding: 0.5rem;
     outline: none;
     user-select: none;
-}
-
-.icon {
-    width: 100%;
-    height: 100%;
-}
-
-/* @todo: refactor radio divs to input */
-.radio {
-    filter: saturate(0);
-    cursor: pointer;
-}
-.radio.is-active {
-    filter: none;
-}
-.radio.is-disabled {
-    cursor: default;
-}
-
-.radio-left {
-    border: 1px solid $ui-black-transparent;
-    border-top-left-radius: $form-radius;
-    border-bottom-left-radius: $form-radius;
-}
-
-.radio-left:focus {
-    border-color: $motion-primary;
-    box-shadow: inset 0 0 0 -2px $ui-black-transparent;
-}
-
-.radio-right {
-    border-bottom: 1px solid $ui-black-transparent;
-    border-top: 1px solid $ui-black-transparent;
-    border-right: 1px solid $ui-black-transparent;
-    border-left: 1px solid $ui-black-transparent;
-    border-top-right-radius: $form-radius;
-    border-bottom-right-radius: $form-radius;
-}
-
-.radio-right:focus {
-    border-color: $motion-primary;
-    box-shadow: inset 0 0 0 -2px $ui-black-transparent;
 }
 
 .icon {
@@ -96,7 +62,7 @@
 }
 
 .rotation-select:focus {
-    border-color: $motion-primary;
+    border-color: $looks-secondary;
     box-shadow: inset 0 0 0 1px $ui-black-transparent);
 }
 

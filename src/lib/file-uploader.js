@@ -1,5 +1,7 @@
-import {importBitmap} from 'scratch-svg-renderer';
-import log from './log.js';
+import {BitmapAdapter, sanitizeSvg} from 'scratch-svg-renderer';
+import randomizeSpritePosition from './randomize-sprite-position.js';
+import bmpConverter from './bmp-converter';
+import gifDecoder from './gif-decoder';
 
 /**
  * Extract the file name given a string of the form fileName + ext
@@ -18,24 +20,29 @@ const extractFileName = function (nameExt) {
  * and a function to handle loading the file.
  * @param {Input} fileInput The <input/> element that contains the file being loaded
  * @param {Function} onload The function that handles loading the file
+ * @param {Function} onerror The function that handles any error loading the file
  */
-const handleFileUpload = function (fileInput, onload) {
-    let thisFile = null;
-    const reader = new FileReader();
-    reader.onload = () => {
-        // Reset the file input value now that we have everything we need
-        // so that the user can upload the same sound multiple times if
-        // they choose
-        fileInput.value = null;
-        const fileType = thisFile.type;
-        const fileName = extractFileName(thisFile.name);
-
-        onload(reader.result, fileType, fileName);
+const handleFileUpload = function (fileInput, onload, onerror) {
+    const readFile = (i, files) => {
+        if (i === files.length) {
+            // Reset the file input value now that we have everything we need
+            // so that the user can upload the same sound multiple times if
+            // they choose
+            fileInput.value = null;
+            return;
+        }
+        const file = files[i];
+        const reader = new FileReader();
+        reader.onload = () => {
+            const fileType = file.type;
+            const fileName = extractFileName(file.name);
+            onload(reader.result, fileType, fileName, i, files.length);
+            readFile(i + 1, files);
+        };
+        reader.onerror = onerror;
+        reader.readAsArrayBuffer(file);
     };
-    if (fileInput.files) {
-        thisFile = fileInput.files[0];
-        reader.readAsArrayBuffer(thisFile);
-    }
+    readFile(0, fileInput.files);
 };
 
 /**
@@ -47,13 +54,13 @@ const handleFileUpload = function (fileInput, onload) {
  * @property {string} dataFormat The data format of this asset, typically
  * the extension to be used for that particular asset, e.g. 'svg' for vector images
  * @property {string} md5 The md5 hash of the asset data, followed by '.'' and dataFormat
+ * @property {string} The md5 hash of the asset data // TODO remove duplication....
  */
 
 /**
- * Cache an asset (costume, sound) in storage and return an object representation
+ * Create an asset (costume, sound) with storage and return an object representation
  * of the asset to track in the VM.
  * @param {ScratchStorage} storage The storage to cache the asset in
- * @param {string} fileName The name of the asset
  * @param {AssetType} assetType A ScratchStorage AssetType indicating what kind of
  * asset this is.
  * @param {string} dataFormat The format of this data (typically the file extension)
@@ -61,35 +68,43 @@ const handleFileUpload = function (fileInput, onload) {
  * @return {VMAsset} An object representing this asset and relevant information
  * which can be used to look up the data in storage
  */
-const cacheAsset = function (storage, fileName, assetType, dataFormat, data) {
-    const md5 = storage.builtinHelper.cache(
+const createVMAsset = function (storage, assetType, dataFormat, data) {
+    const asset = storage.createAsset(
         assetType,
         dataFormat,
-        data
+        data,
+        null,
+        true // generate md5
     );
 
     return {
-        name: fileName,
+        name: null, // Needs to be set by caller
         dataFormat: dataFormat,
-        md5: `${md5}.${dataFormat}`
+        asset: asset,
+        md5: `${asset.assetId}.${dataFormat}`,
+        assetId: asset.assetId
     };
 };
 
 /**
  * Handles loading a costume or a backdrop using the provided, context-relevant information.
- * @param {ArrayBuffer} fileData The costume data to load
+ * @param {ArrayBuffer | string} fileData The costume data to load (this can be a base64 string
+ * iff the image is a bitmap)
  * @param {string} fileType The MIME type of this file
- * @param {string} costumeName The user-readable name to use for the costume.
  * @param {ScratchStorage} storage The ScratchStorage instance to cache the costume data
  * @param {Function} handleCostume The function to execute on the costume object returned after
  * caching this costume in storage - This function should be responsible for
  * adding the costume to the VM and handling other UI flow that should come after adding the costume
+ * @param {Function} handleError The function to execute if there is an error parsing the costume
  */
-const costumeUpload = function (fileData, fileType, costumeName, storage, handleCostume) {
+const costumeUpload = function (fileData, fileType, storage, handleCostume, handleError = () => {}) {
     let costumeFormat = null;
     let assetType = null;
     switch (fileType) {
     case 'image/svg+xml': {
+        // run svg bytes through scratch-svg-renderer's sanitization code
+        fileData = sanitizeSvg.sanitizeByteStream(fileData);
+
         costumeFormat = storage.DataFormat.SVG;
         assetType = storage.AssetType.ImageVector;
         break;
@@ -99,23 +114,45 @@ const costumeUpload = function (fileData, fileType, costumeName, storage, handle
         assetType = storage.AssetType.ImageBitmap;
         break;
     }
+    case 'image/bmp': {
+        // Convert .bmp files to .png to compress them. .bmps are completely uncompressed,
+        // and would otherwise take up a lot of storage space and take much longer to upload and download.
+        bmpConverter(fileData).then(dataUrl => {
+            costumeUpload(dataUrl, 'image/png', storage, handleCostume);
+        });
+        return; // Return early because we're triggering another proper costumeUpload
+    }
     case 'image/png': {
         costumeFormat = storage.DataFormat.PNG;
         assetType = storage.AssetType.ImageBitmap;
         break;
     }
+    case 'image/gif': {
+        let costumes = [];
+        gifDecoder(fileData, (frameNumber, dataUrl, numFrames) => {
+            costumeUpload(dataUrl, 'image/png', storage, costumes_ => {
+                costumes = costumes.concat(costumes_);
+                if (frameNumber === numFrames - 1) {
+                    handleCostume(costumes);
+                }
+            }, handleError);
+        });
+        return; // Abandon this load, do not try to load gif itself
+    }
     default:
+        handleError(`Encountered unexpected file type: ${fileType}`);
         return;
     }
 
-    const addCostumeFromBuffer = function (error, costumeBuffer) {
-        if (error) {
-            log.warn(`An error occurred while trying to extract image data: ${error}`);
-            return;
-        }
-
-        const vmCostume = cacheAsset(storage, costumeName, assetType, costumeFormat, costumeBuffer);
-        handleCostume(vmCostume);
+    const bitmapAdapter = new BitmapAdapter();
+    const addCostumeFromBuffer = function (dataBuffer) {
+        const vmCostume = createVMAsset(
+            storage,
+            assetType,
+            costumeFormat,
+            dataBuffer
+        );
+        handleCostume([vmCostume]);
     };
 
     if (costumeFormat === storage.DataFormat.SVG) {
@@ -123,10 +160,11 @@ const costumeUpload = function (fileData, fileType, costumeName, storage, handle
         // passing in an array buffer causes the sprite/costume
         // thumbnails to not display because the data URI for the costume
         // is invalid
-        addCostumeFromBuffer(null, new Uint8Array(fileData));
+        addCostumeFromBuffer(new Uint8Array(fileData));
     } else {
         // otherwise it's a bitmap
-        importBitmap(fileData, addCostumeFromBuffer);
+        bitmapAdapter.importBitmap(fileData, fileType).then(addCostumeFromBuffer)
+            .catch(handleError);
     }
 };
 
@@ -135,30 +173,34 @@ const costumeUpload = function (fileData, fileType, costumeName, storage, handle
  * @param {ArrayBuffer} fileData The sound data to load
  * @param {string} fileType The MIME type of this file; This function will exit
  * early if the fileType is unexpected.
- * @param {string} soundName The user-readable name to use for the sound.
-  * @param {ScratchStorage} storage The ScratchStorage instance to cache the sound data
+ * @param {ScratchStorage} storage The ScratchStorage instance to cache the sound data
  * @param {Function} handleSound The function to execute on the sound object of type VMAsset
  * This function should be responsible for adding the sound to the VM
  * as well as handling other UI flow that should come after adding the sound
+ * @param {Function} handleError The function to execute if there is an error parsing the sound
  */
-const soundUpload = function (fileData, fileType, soundName, storage, handleSound) {
+const soundUpload = function (fileData, fileType, storage, handleSound, handleError) {
     let soundFormat;
     switch (fileType) {
-    case 'audio/mp3': {
+    case 'audio/mp3':
+    case 'audio/mpeg': {
         soundFormat = storage.DataFormat.MP3;
         break;
     }
-    case 'audio/wav': { // TODO support audio/x-wav? Do we see this in the wild?
+    case 'audio/wav':
+    case 'audio/wave':
+    case 'audio/x-wav':
+    case 'audio/x-pn-wav': {
         soundFormat = storage.DataFormat.WAV;
         break;
     }
     default:
+        handleError(`Encountered unexpected file type: ${fileType}`);
         return;
     }
 
-    const vmSound = cacheAsset(
+    const vmSound = createVMAsset(
         storage,
-        soundName,
         storage.AssetType.Sound,
         soundFormat,
         new Uint8Array(fileData));
@@ -166,8 +208,55 @@ const soundUpload = function (fileData, fileType, soundName, storage, handleSoun
     handleSound(vmSound);
 };
 
+const spriteUpload = function (fileData, fileType, spriteName, storage, handleSprite, handleError = () => {}) {
+    switch (fileType) {
+    case '':
+    case 'application/zip': { // We think this is a .sprite2 or .sprite3 file
+        handleSprite(new Uint8Array(fileData));
+        return;
+    }
+    case 'image/svg+xml':
+    case 'image/png':
+    case 'image/bmp':
+    case 'image/jpeg':
+    case 'image/gif': {
+        // Make a sprite from an image by making it a costume first
+        costumeUpload(fileData, fileType, storage, vmCostumes => {
+            vmCostumes.forEach((costume, i) => {
+                costume.name = `${spriteName}${i ? i + 1 : ''}`;
+            });
+            const newSprite = {
+                name: spriteName,
+                isStage: false,
+                x: 0, // x/y will be randomized below
+                y: 0,
+                visible: true,
+                size: 100,
+                rotationStyle: 'all around',
+                direction: 90,
+                draggable: false,
+                currentCostume: 0,
+                blocks: {},
+                variables: {},
+                costumes: vmCostumes,
+                sounds: [] // TODO are all of these necessary?
+            };
+            randomizeSpritePosition(newSprite);
+            // TODO probably just want sprite upload to handle this object directly
+            handleSprite(JSON.stringify(newSprite));
+        }, handleError);
+        return;
+    }
+    default: {
+        handleError(`Encountered unexpected file type: ${fileType}`);
+        return;
+    }
+    }
+};
+
 export {
     handleFileUpload,
     costumeUpload,
-    soundUpload
+    soundUpload,
+    spriteUpload
 };

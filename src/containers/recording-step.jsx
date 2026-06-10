@@ -3,6 +3,15 @@ import PropTypes from 'prop-types';
 import bindAll from 'lodash.bindall';
 import RecordingStepComponent from '../components/record-modal/recording-step.jsx';
 import AudioRecorder from '../lib/audio/audio-recorder.js';
+import {defineMessages, injectIntl, intlShape} from 'react-intl';
+
+const messages = defineMessages({
+    alertMsg: {
+        defaultMessage: 'Could not start recording',
+        description: 'Alert for recording error',
+        id: 'gui.recordingStep.alertMsg'
+    }
+});
 
 class RecordingStep extends React.Component {
     constructor (props) {
@@ -32,13 +41,13 @@ class RecordingStep extends React.Component {
         this.setState({listening: true});
     }
     handleRecordingError () {
-        alert('Could not start recording'); // eslint-disable-line no-alert
+        alert(this.props.intl.formatMessage(messages.alertMsg)); // eslint-disable-line no-alert
     }
     handleLevelUpdate (level) {
-        this.setState({level});
-        if (this.props.recording) {
-            this.setState({levels: (this.state.levels || []).concat([level])});
-        }
+        this.setState({
+            level: level,
+            levels: this.props.recording ? (this.state.levels || []).concat([level]) : this.state.levels
+        });
     }
     handleRecord () {
         this.audioRecorder.startRecording();
@@ -68,9 +77,10 @@ class RecordingStep extends React.Component {
 }
 
 RecordingStep.propTypes = {
+    intl: intlShape.isRequired,
     onRecord: PropTypes.func.isRequired,
     onStopRecording: PropTypes.func.isRequired,
     recording: PropTypes.bool
 };
 
-export default RecordingStep;
+export default injectIntl(RecordingStep);
